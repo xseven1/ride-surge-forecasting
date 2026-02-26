@@ -1,5 +1,6 @@
 import time
 from typing import Dict
+import datetime
 
 from common.config import settings
 from common.redis_client import get_redis
@@ -53,16 +54,46 @@ def compute_features(r, z: int, now: int) -> Dict[str, str]:
         "dow": str(dow),
     }
 
-def run():
+def run(run_minutes: int | None = None):
     r = get_redis()
-    print("Aggregator started. Computing rolling features...")
-    while True:
-        now = int(time.time())
-        for z in range(settings.N_ZONES):
-            _cleanup_old(r, z, now)
-            feats = compute_features(r, z, now)
-            r.hset(FEATURE_KEY_FMT.format(z=z), mapping=feats)
-        time.sleep(settings.TICK_SECONDS)
+
+    if run_minutes is None:
+        run_minutes = settings.AGGREGATOR_RUN_MINUTES
+    run_seconds = 0 if not run_minutes else int(run_minutes * 60)
+
+    start = time.time()
+    start_ts = int(start)
+    print(f"Aggregator started at {datetime.datetime.fromtimestamp(start_ts)}")
+    if run_seconds:
+        print(f"Aggregator will stop after {run_minutes} minute(s). Press Ctrl+C to stop earlier.")
+    else:
+        print("Aggregator will run until you stop it (Ctrl+C).")
+
+    try:
+        while True:
+            now = int(time.time())
+
+            if run_seconds and (time.time() - start) >= run_seconds:
+                print("Aggregator reached time limit. Stopping.")
+                break
+
+            for z in range(settings.N_ZONES):
+                _cleanup_old(r, z, now)
+                feats = compute_features(r, z, now)
+                r.hset(FEATURE_KEY_FMT.format(z=z), mapping=feats)
+
+            elapsed = int(time.time() - start)
+            if elapsed % 10 == 0:
+                remaining = None if not run_seconds else max(0, run_seconds - elapsed)
+                msg = f"[agg] elapsed={elapsed}s"
+                if remaining is not None:
+                    msg += f" remaining={remaining}s"
+                print(msg)
+
+            time.sleep(settings.TICK_SECONDS)
+
+    except KeyboardInterrupt:
+        print("Aggregator stopped by user (Ctrl+C).")
 
 if __name__ == "__main__":
     run()

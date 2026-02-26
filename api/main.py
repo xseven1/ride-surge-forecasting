@@ -21,9 +21,18 @@ FEATURE_COLS = [
 app = FastAPI(title="Real-Time Demand Forecasting API")
 r = get_redis()
 
+import os
+import traceback
+
+print("CWD:", os.getcwd())
+print("MODEL_PATH:", settings.MODEL_PATH)
+
 try:
     model = joblib.load(settings.MODEL_PATH)
-except Exception:
+    print("Model loaded OK")
+except Exception as e:
+    print("Model load failed:", repr(e))
+    traceback.print_exc()
     model = None
 
 class ControlsIn(BaseModel):
