@@ -1,10 +1,10 @@
 import time
+import os
 import pandas as pd
 from typing import List, Dict
 import joblib
 
 from lightgbm import LGBMRegressor
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from common.config import settings
@@ -22,9 +22,7 @@ FEATURE_COLS = [
 
 def _future_count(r, z: int, t0: int) -> int:
     key = EVENT_ZSET_KEY_FMT.format(z=z)
-    start = t0 + 1
-    end = t0 + settings.HORIZON_SEC
-    return r.zcount(key, start, end)
+    return r.zcount(key, t0 + 1, t0 + settings.HORIZON_SEC)
 
 def collect_rows(duration_minutes: int = 10, sample_every_sec: int = 10) -> pd.DataFrame:
     r = get_redis()
@@ -39,30 +37,25 @@ def collect_rows(duration_minutes: int = 10, sample_every_sec: int = 10) -> pd.D
             if not feats:
                 continue
 
-            # Build row
             row = {c: float(feats[c]) for c in FEATURE_COLS if c in feats}
             row["zone_id"] = z
             row["ts"] = t0
-
-            # Label: count future events in next 5 minutes
-            y = _future_count(r, z, t0)
-            row["next_5m_demand"] = float(y)
-
+            row["next_5m_demand"] = float(_future_count(r, z, t0))
             rows.append(row)
 
         time.sleep(sample_every_sec)
 
-    df = pd.DataFrame(rows)
-    return df
+    return pd.DataFrame(rows)
 
 def train_and_save(df: pd.DataFrame):
-    df = df.dropna()
+    df = df.dropna().sort_values("ts")
+
     X = df[FEATURE_COLS]
     y = df["next_5m_demand"]
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+    split = int(len(df) * 0.8)
+    X_train, X_test = X.iloc[:split], X.iloc[split:]
+    y_train, y_test = y.iloc[:split], y.iloc[split:]
 
     model = LGBMRegressor(
         n_estimators=400,
@@ -81,12 +74,14 @@ def train_and_save(df: pd.DataFrame):
     print(f"MAE:  {mae:.4f}")
     print(f"RMSE: {rmse:.4f}")
 
+    os.makedirs("model/artifacts", exist_ok=True)
     joblib.dump(model, settings.MODEL_PATH)
     print(f"Saved model -> {settings.MODEL_PATH}")
 
 def main():
     df = collect_rows(duration_minutes=10, sample_every_sec=10)
     print("Rows collected:", len(df))
+    os.makedirs("model/artifacts", exist_ok=True)
     df.to_csv("model/artifacts/training_data.csv", index=False)
     train_and_save(df)
 

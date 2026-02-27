@@ -14,7 +14,7 @@ class Settings:
     MODEL_PATH: str = "model/artifacts/demand_lgbm.joblib"
 
     # NEW: default run durations (set to 0 for infinite)
-    SIMULATOR_RUN_MINUTES: int = 10
-    AGGREGATOR_RUN_MINUTES: int = 10
+    SIMULATOR_RUN_MINUTES: int = 40
+    AGGREGATOR_RUN_MINUTES: int = 40
 
 settings = Settings()
